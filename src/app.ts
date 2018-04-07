@@ -1,6 +1,7 @@
 import express from "express";
 import compression from "compression";  // compresses requests
 import session from "express-session";
+import mysqlSession from "express-mysql-session";
 import bodyParser from "body-parser";
 import logger from "./util/logger";
 import lusca from "lusca";
@@ -15,6 +16,41 @@ import bluebird from "bluebird";
 import { MONGODB_URI, SESSION_SECRET } from "./util/secrets";
 
 const MongoStore = mongo(session);
+const MySQLStore = mysqlSession(session);
+// typeorm
+import "reflect-metadata";
+import { createConnection } from "typeorm";
+
+// create connection with database
+// note that it's not active database connection
+// TypeORM creates connection pools and uses them for your requests
+createConnection(
+  {
+    "type": "mysql",
+    "host": "localhost",
+    "port": 3306,
+    "username": "root",
+    "password": "123",
+    "database": "express-fuel-delivery",
+    "synchronize": true,
+    "entities": [
+      "dist/models/*.js"
+    ],
+    "subscribers": [
+      "dist/subscriber/*.js"
+    ],
+    "migrations": [
+      "dist/migration/*.js"
+    ],
+    "cli": {
+      "entitiesDir": "src/models",
+      "migrationsDir": "src/migration",
+      "subscribersDir": "src/subscriber"
+    }
+  }
+).then(function () {
+  console.log("Connection created successfully");
+}).catch(error => console.log("TypeORM connection error: ", error));
 
 // Load environment variables from .env file, where API keys and passwords are configured
 dotenv.config({ path: ".env.example" });
@@ -24,6 +60,7 @@ import * as homeController from "./controllers/home";
 import * as userController from "./controllers/user";
 import * as apiController from "./controllers/api";
 import * as contactController from "./controllers/contact";
+import * as postController from "./controllers/post";
 
 
 // API keys and Passport configuration
@@ -50,14 +87,25 @@ app.use(compression());
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(expressValidator());
+
+// setup express session
+const options = {
+  host: "localhost",
+  port: 3306,
+  user: "root",
+  password: "123",
+  database: "express-fuel-delivery"
+};
+const sessionStore = new MySQLStore(options);
 app.use(session({
   resave: true,
-  saveUninitialized: true,
+  saveUninitialized: false,
   secret: SESSION_SECRET,
-  store: new MongoStore({
-    url: mongoUrl,
-    autoReconnect: true
-  })
+  // store: new MongoStore({
+  //   url: mongoUrl,
+  //   autoReconnect: true
+  // })
+  store: sessionStore
 }));
 app.use(passport.initialize());
 app.use(passport.session());
@@ -107,6 +155,9 @@ app.post("/account/profile", passportConfig.isAuthenticated, userController.post
 app.post("/account/password", passportConfig.isAuthenticated, userController.postUpdatePassword);
 app.post("/account/delete", passportConfig.isAuthenticated, userController.postDeleteAccount);
 app.get("/account/unlink/:provider", passportConfig.isAuthenticated, userController.getOauthUnlink);
+app.get("/posts", postController.postGetAllAction);
+app.get("/posts/:id", postController.postGetByIdAction);
+app.post("/posts", postController.postSaveAction);
 
 /**
  * API examples routes.

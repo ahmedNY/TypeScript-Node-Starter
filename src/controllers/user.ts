@@ -2,7 +2,8 @@ import async from "async";
 import crypto from "crypto";
 import nodemailer from "nodemailer";
 import passport from "passport";
-import { default as User, UserModel, AuthToken } from "../models/User";
+import { default as User, UserModel, UmUser, AuthToken } from "../models/User";
+import { getManager } from "typeorm";
 import { Request, Response, NextFunction } from "express";
 import { IVerifyOptions } from "passport-local";
 import { WriteError } from "mongodb";
@@ -38,7 +39,7 @@ export let postLogin = (req: Request, res: Response, next: NextFunction) => {
     return res.redirect("/login");
   }
 
-  passport.authenticate("local", (err: Error, user: UserModel, info: IVerifyOptions) => {
+  passport.authenticate("local", (err: Error, user: UmUser, info: IVerifyOptions) => {
     if (err) { return next(err); }
     if (!user) {
       req.flash("errors", info.message);
@@ -78,7 +79,7 @@ export let getSignup = (req: Request, res: Response) => {
  * POST /signup
  * Create a new local account.
  */
-export let postSignup = (req: Request, res: Response, next: NextFunction) => {
+export let postSignup = async (req: Request, res: Response, next: NextFunction) => {
   req.assert("email", "Email is not valid").isEmail();
   req.assert("password", "Password must be at least 4 characters long").len({ min: 4 });
   req.assert("confirmPassword", "Passwords do not match").equals(req.body.password);
@@ -91,27 +92,54 @@ export let postSignup = (req: Request, res: Response, next: NextFunction) => {
     return res.redirect("/signup");
   }
 
-  const user = new User({
-    email: req.body.email,
-    password: req.body.password
-  });
+  // find ther user
+  // get a user repository to perform operations with user
+  const userRepository = getManager().getRepository(UmUser);
 
-  User.findOne({ email: req.body.email }, (err, existingUser) => {
-    if (err) { return next(err); }
+  // load a user by a given user id
+  try {
+    const existingUser = await userRepository.findOne({ email: req.body.email });
     if (existingUser) {
       req.flash("errors", { msg: "Account with that email address already exists." });
       return res.redirect("/signup");
     }
-    user.save((err) => {
-      if (err) { return next(err); }
-      req.logIn(user, (err) => {
-        if (err) {
-          return next(err);
-        }
-        res.redirect("/");
-      });
+    const user = userRepository.create({
+        email: req.body.email,
+        password: req.body.password
     });
-  });
+    await userRepository.save(user);
+
+    req.logIn(user, (err) => {
+      if (err) {
+        return next(err);
+      }
+      res.redirect("/");
+    });
+  } catch (err) {
+    if (err) { return next(err); }
+  }
+
+  // const user = new User({
+  //   email: req.body.email,
+  //   password: req.body.password
+  // });
+
+  // User.findOne({ email: req.body.email }, (err, existingUser) => {
+  //   if (err) { return next(err); }
+  //   if (existingUser) {
+  //     req.flash("errors", { msg: "Account with that email address already exists." });
+  //     return res.redirect("/signup");
+  //   }
+  //   user.save((err) => {
+  //     if (err) { return next(err); }
+  //     req.logIn(user, (err) => {
+  //       if (err) {
+  //         return next(err);
+  //       }
+  //       res.redirect("/");
+  //     });
+  //   });
+  // });
 };
 
 /**

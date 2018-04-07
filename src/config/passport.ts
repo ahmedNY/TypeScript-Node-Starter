@@ -5,7 +5,8 @@ import passportFacebook from "passport-facebook";
 import _ from "lodash";
 
 // import { User, UserType } from '../models/User';
-import { default as User } from "../models/User";
+import { default as User, UmUser } from "../models/User";
+import { getManager } from "typeorm";
 import { Request, Response, NextFunction } from "express";
 
 const LocalStrategy = passportLocal.Strategy;
@@ -15,19 +16,27 @@ passport.serializeUser<any, any>((user, done) => {
   done(undefined, user.id);
 });
 
-passport.deserializeUser((id, done) => {
-  User.findById(id, (err, user) => {
-    done(err, user);
-  });
+passport.deserializeUser(async (id, done) => {
+  try {
+    const userRepository = getManager().getRepository(UmUser);
+    const user = await userRepository.findOneById(id);
+    done(false, user);
+  } catch (err) {
+    done(err);
+  }
+  // User.findById(id, (err, user) => {
+  //   done(err, user);
+  // });
 });
 
 
 /**
  * Sign in using Email and Password.
  */
-passport.use(new LocalStrategy({ usernameField: "email" }, (email, password, done) => {
-  User.findOne({ email: email.toLowerCase() }, (err, user: any) => {
-    if (err) { return done(err); }
+passport.use(new LocalStrategy({ usernameField: "email" }, async (email, password, done) => {
+  try {
+    const userRepository = getManager().getRepository(UmUser);
+    const user = await userRepository.findOne({email: email.toLocaleLowerCase()});
     if (!user) {
       return done(undefined, false, { message: `Email ${email} not found.` });
     }
@@ -38,7 +47,24 @@ passport.use(new LocalStrategy({ usernameField: "email" }, (email, password, don
       }
       return done(undefined, false, { message: "Invalid email or password." });
     });
-  });
+  } catch (error) {
+    return done(error);
+  }
+
+
+  // User.findOne({ email: email.toLowerCase() }, (err, user: any) => {
+  //   if (err) { return done(err); }
+  //   if (!user) {
+  //     return done(undefined, false, { message: `Email ${email} not found.` });
+  //   }
+  //   user.comparePassword(password, (err: Error, isMatch: boolean) => {
+  //     if (err) { return done(err); }
+  //     if (isMatch) {
+  //       return done(undefined, user);
+  //     }
+  //     return done(undefined, false, { message: "Invalid email or password." });
+  //   });
+  // });
 }));
 
 
