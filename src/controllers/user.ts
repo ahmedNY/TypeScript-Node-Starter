@@ -2,11 +2,10 @@ import async from "async";
 import crypto from "crypto";
 import nodemailer from "nodemailer";
 import passport from "passport";
-import { default as User, UserModel, UmUser, AuthToken } from "../models/User";
+import { UmUser } from "../models/User";
 import { getManager } from "typeorm";
 import { Request, Response, NextFunction } from "express";
 import { IVerifyOptions } from "passport-local";
-import { WriteError } from "mongodb";
 const request = require("express-validator");
 
 
@@ -92,12 +91,9 @@ export let postSignup = async (req: Request, res: Response, next: NextFunction) 
     return res.redirect("/signup");
   }
 
-  // find ther user
-  // get a user repository to perform operations with user
-  const userRepository = getManager().getRepository(UmUser);
-
   // load a user by a given user id
   try {
+    const userRepository = getManager().getRepository(UmUser);
     const existingUser = await userRepository.findOne({ email: req.body.email });
     if (existingUser) {
       req.flash("errors", { msg: "Account with that email address already exists." });
@@ -118,28 +114,6 @@ export let postSignup = async (req: Request, res: Response, next: NextFunction) 
   } catch (err) {
     if (err) { return next(err); }
   }
-
-  // const user = new User({
-  //   email: req.body.email,
-  //   password: req.body.password
-  // });
-
-  // User.findOne({ email: req.body.email }, (err, existingUser) => {
-  //   if (err) { return next(err); }
-  //   if (existingUser) {
-  //     req.flash("errors", { msg: "Account with that email address already exists." });
-  //     return res.redirect("/signup");
-  //   }
-  //   user.save((err) => {
-  //     if (err) { return next(err); }
-  //     req.logIn(user, (err) => {
-  //       if (err) {
-  //         return next(err);
-  //       }
-  //       res.redirect("/");
-  //     });
-  //   });
-  // });
 };
 
 /**
@@ -156,7 +130,7 @@ export let getAccount = (req: Request, res: Response) => {
  * POST /account/profile
  * Update profile information.
  */
-export let postUpdateProfile = (req: Request, res: Response, next: NextFunction) => {
+export let postUpdateProfile = async (req: Request, res: Response, next: NextFunction) => {
   req.assert("email", "Please enter a valid email address.").isEmail();
   req.sanitize("email").normalizeEmail({ gmail_remove_dots: false });
 
@@ -166,33 +140,27 @@ export let postUpdateProfile = (req: Request, res: Response, next: NextFunction)
     req.flash("errors", errors);
     return res.redirect("/account");
   }
-
-  User.findById(req.user.id, (err, user: UserModel) => {
-    if (err) { return next(err); }
+  const userRepository = getManager().getRepository(UmUser);
+  try {
+    const user = await userRepository.findOneById(req.user.id);
     user.email = req.body.email || "";
-    user.profile.name = req.body.name || "";
-    user.profile.gender = req.body.gender || "";
-    user.profile.location = req.body.location || "";
-    user.profile.website = req.body.website || "";
-    user.save((err: WriteError) => {
-      if (err) {
-        if (err.code === 11000) {
-          req.flash("errors", { msg: "The email address you have entered is already associated with an account." });
-          return res.redirect("/account");
-        }
-        return next(err);
-      }
-      req.flash("success", { msg: "Profile information has been updated." });
-      res.redirect("/account");
-    });
-  });
+    user.name = req.body.name || "";
+    user.gender = req.body.gender || "";
+    user.location = req.body.location || "";
+    user.website = req.body.website || "";
+    userRepository.save(user);
+    req.flash("success", { msg: "Profile information has been updated." });
+    res.redirect("/account");
+  } catch (error) {
+    if (error) { return next(error); }
+  }
 };
 
 /**
  * POST /account/password
  * Update current password.
  */
-export let postUpdatePassword = (req: Request, res: Response, next: NextFunction) => {
+export let postUpdatePassword = async (req: Request, res: Response, next: NextFunction) => {
   req.assert("password", "Password must be at least 4 characters long").len({ min: 4 });
   req.assert("confirmPassword", "Passwords do not match").equals(req.body.password);
 
@@ -202,70 +170,86 @@ export let postUpdatePassword = (req: Request, res: Response, next: NextFunction
     req.flash("errors", errors);
     return res.redirect("/account");
   }
-
-  User.findById(req.user.id, (err, user: UserModel) => {
-    if (err) { return next(err); }
+  try {
+    const userRepository = getManager().getRepository(UmUser);
+    const user = await userRepository.findOneById(req.user.id);
     user.password = req.body.password;
-    user.save((err: WriteError) => {
-      if (err) { return next(err); }
-      req.flash("success", { msg: "Password has been changed." });
-      res.redirect("/account");
-    });
-  });
+    await userRepository.save(user);
+    req.flash("success", { msg: "Password has been changed." });
+    res.redirect("/account");
+  } catch (err) {
+    if (err) { return next(err); }
+  }
 };
 
 /**
  * POST /account/delete
  * Delete user account.
  */
-export let postDeleteAccount = (req: Request, res: Response, next: NextFunction) => {
-  User.remove({ _id: req.user.id }, (err) => {
-    if (err) { return next(err); }
+export let postDeleteAccount = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userRepository = getManager().getRepository(UmUser);
+    await userRepository.removeById(req.user.id);
     req.logout();
     req.flash("info", { msg: "Your account has been deleted." });
     res.redirect("/");
-  });
+  } catch (err) {
+    if (err) { return next(err); }
+  }
 };
 
 /**
  * GET /account/unlink/:provider
  * Unlink OAuth provider.
  */
-export let getOauthUnlink = (req: Request, res: Response, next: NextFunction) => {
+export let getOauthUnlink = async (req: Request, res: Response, next: NextFunction) => {
   const provider = req.params.provider;
-  User.findById(req.user.id, (err, user: any) => {
+
+  try {
+    const userRepository = getManager().getRepository(UmUser);
+    const user = await userRepository.findOneById(req.user.id);
+    switch (provider) {
+      case "facebook":
+        user.facebook = undefined;
+        user.facebookToken = undefined;
+        await userRepository.save(user);
+        break;
+        case "google":
+        user.google = undefined;
+      default:
+        return next("unknow provider " + provider);
+    }
+    req.flash("info", { msg: `${provider} account has been unlinked.` });
+    res.redirect("/account");
+  } catch (err) {
     if (err) { return next(err); }
-    user[provider] = undefined;
-    user.tokens = user.tokens.filter((token: AuthToken) => token.kind !== provider);
-    user.save((err: WriteError) => {
-      if (err) { return next(err); }
-      req.flash("info", { msg: `${provider} account has been unlinked.` });
-      res.redirect("/account");
-    });
-  });
+  }
 };
 
 /**
  * GET /reset/:token
  * Reset Password page.
  */
-export let getReset = (req: Request, res: Response, next: NextFunction) => {
+export let getReset = async (req: Request, res: Response, next: NextFunction) => {
   if (req.isAuthenticated()) {
     return res.redirect("/");
   }
-  User
-    .findOne({ passwordResetToken: req.params.token })
-    .where("passwordResetExpires").gt(Date.now())
-    .exec((err, user) => {
-      if (err) { return next(err); }
-      if (!user) {
-        req.flash("errors", { msg: "Password reset token is invalid or has expired." });
-        return res.redirect("/forgot");
-      }
-      res.render("account/reset", {
-        title: "Password Reset"
-      });
+  const userRepository = getManager().getRepository(UmUser);
+  try {
+    const user = await userRepository.createQueryBuilder()
+                .where({ passwordResetToken: req.params.token })
+                .andWhere("passwordResetExpires > :date", {date: Date.now()})
+                .getOne();
+    if (!user) {
+      req.flash("errors", { msg: "Password reset token is invalid or has expired." });
+      return res.redirect("/forgot");
+    }
+    res.render("account/reset", {
+      title: "Password Reset"
     });
+  } catch (err) {
+    if (err) { return next(err); }
+  }
 };
 
 /**
@@ -284,28 +268,29 @@ export let postReset = (req: Request, res: Response, next: NextFunction) => {
   }
 
   async.waterfall([
-    function resetPassword(done: Function) {
-      User
-        .findOne({ passwordResetToken: req.params.token })
-        .where("passwordResetExpires").gt(Date.now())
-        .exec((err, user: any) => {
-          if (err) { return next(err); }
-          if (!user) {
-            req.flash("errors", { msg: "Password reset token is invalid or has expired." });
-            return res.redirect("back");
-          }
-          user.password = req.body.password;
-          user.passwordResetToken = undefined;
-          user.passwordResetExpires = undefined;
-          user.save((err: WriteError) => {
-            if (err) { return next(err); }
-            req.logIn(user, (err) => {
-              done(err, user);
-            });
-          });
+    async function resetPassword(done: Function) {
+      try {
+        const userRepository = getManager().getRepository(UmUser);
+        const user = await userRepository.createQueryBuilder()
+          .where({ passwordResetToken: req.params.token })
+          .andWhere("passwordResetExpires > :date", { date: Date.now() })
+          .getOne();
+        if (!user) {
+          req.flash("errors", { msg: "Password reset token is invalid or has expired." });
+          return res.redirect("back");
+        }
+        user.password = req.body.password;
+        user.passwordResetToken = undefined;
+        user.passwordResetExpires = undefined;
+        await userRepository.save(user);
+        req.logIn(user, (err) => {
+          done(err, user);
         });
+      } catch (err) {
+        if (err) { return next(err); }
+      }
     },
-    function sendResetPasswordEmail(user: UserModel, done: Function) {
+    function sendResetPasswordEmail(user: UmUser, done: Function) {
       const transporter = nodemailer.createTransport({
         service: "SendGrid",
         auth: {
@@ -365,21 +350,35 @@ export let postForgot = (req: Request, res: Response, next: NextFunction) => {
         done(err, token);
       });
     },
-    function setRandomToken(token: AuthToken, done: Function) {
-      User.findOne({ email: req.body.email }, (err, user: any) => {
-        if (err) { return done(err); }
+    async function setRandomToken(token: string, done: Function) {
+      try {
+        const userRepository = getManager().getRepository(UmUser);
+        const user = await userRepository.findOne({email: req.body.email});
         if (!user) {
           req.flash("errors", { msg: "Account with that email address does not exist." });
           return res.redirect("/forgot");
         }
         user.passwordResetToken = token;
         user.passwordResetExpires = Date.now() + 3600000; // 1 hour
-        user.save((err: WriteError) => {
-          done(err, token, user);
-        });
-      });
+      } catch (err) {
+        if (err) { return done(err); }
+      }
+      try {
+        const userRepository = getManager().getRepository(UmUser);
+        const user = await userRepository.findOne({ email: req.body.email });
+        if (!user) {
+          req.flash("errors", { msg: "Account with that email address does not exist." });
+          return res.redirect("/forgot");
+        }
+        user.passwordResetToken = token;
+        user.passwordResetExpires = Date.now() + 3600000; // 1 hour
+        await userRepository.save(user);
+        done(undefined, token, user);
+      } catch (err) {
+        if (err) { return done(err); }
+      }
     },
-    function sendForgotPasswordEmail(token: AuthToken, user: UserModel, done: Function) {
+    function sendForgotPasswordEmail(token: string, user: UmUser, done: Function) {
       const transporter = nodemailer.createTransport({
         service: "SendGrid",
         auth: {

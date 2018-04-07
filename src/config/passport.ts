@@ -5,7 +5,7 @@ import passportFacebook from "passport-facebook";
 import _ from "lodash";
 
 // import { User, UserType } from '../models/User';
-import { default as User, UmUser } from "../models/User";
+import { UmUser } from "../models/User";
 import { getManager } from "typeorm";
 import { Request, Response, NextFunction } from "express";
 
@@ -24,9 +24,6 @@ passport.deserializeUser(async (id, done) => {
   } catch (err) {
     done(err);
   }
-  // User.findById(id, (err, user) => {
-  //   done(err, user);
-  // });
 });
 
 
@@ -50,21 +47,6 @@ passport.use(new LocalStrategy({ usernameField: "email" }, async (email, passwor
   } catch (error) {
     return done(error);
   }
-
-
-  // User.findOne({ email: email.toLowerCase() }, (err, user: any) => {
-  //   if (err) { return done(err); }
-  //   if (!user) {
-  //     return done(undefined, false, { message: `Email ${email} not found.` });
-  //   }
-  //   user.comparePassword(password, (err: Error, isMatch: boolean) => {
-  //     if (err) { return done(err); }
-  //     if (isMatch) {
-  //       return done(undefined, user);
-  //     }
-  //     return done(undefined, false, { message: "Invalid email or password." });
-  //   });
-  // });
 }));
 
 
@@ -93,54 +75,54 @@ passport.use(new FacebookStrategy({
   callbackURL: "/auth/facebook/callback",
   profileFields: ["name", "email", "link", "locale", "timezone"],
   passReqToCallback: true
-}, (req: any, accessToken, refreshToken, profile, done) => {
+}, async (req: any, accessToken, refreshToken, profile, done) => {
   if (req.user) {
-    User.findOne({ facebook: profile.id }, (err, existingUser) => {
-      if (err) { return done(err); }
+    const userRepository = getManager().getRepository(UmUser);
+    try {
+      const existingUser = await userRepository.findOne();
       if (existingUser) {
         req.flash("errors", { msg: "There is already a Facebook account that belongs to you. Sign in with that account or delete it, then link it with your current account." });
-        done(err);
+        done(undefined);
       } else {
-        User.findById(req.user.id, (err, user: any) => {
-          if (err) { return done(err); }
-          user.facebook = profile.id;
-          user.tokens.push({ kind: "facebook", accessToken });
-          user.profile.name = user.profile.name || `${profile.name.givenName} ${profile.name.familyName}`;
-          user.profile.gender = user.profile.gender || profile._json.gender;
-          user.profile.picture = user.profile.picture || `https://graph.facebook.com/${profile.id}/picture?type=large`;
-          user.save((err: Error) => {
-            req.flash("info", { msg: "Facebook account has been linked." });
-            done(err, user);
-          });
-        });
+        const user = await userRepository.findOneById(req.user.id);
+        user.facebook = profile.id;
+        user.facebookToken = accessToken;
+        user.name = user.name || `${profile.name.givenName} ${profile.name.familyName}`;
+        user.gender = user.gender || profile._json.gender;
+        user.picture = user.picture || `https://graph.facebook.com/${profile.id}/picture?type=large`;
+        await userRepository.save(user);
+        req.flash("info", { msg: "Facebook account has been linked." });
+        done(undefined, user);
       }
-    });
+    } catch (error) {
+      return done(error);
+    }
   } else {
-    User.findOne({ facebook: profile.id }, (err, existingUser) => {
-      if (err) { return done(err); }
+    try {
+      const userRepository = getManager().getRepository(UmUser);
+      const existingUser = await userRepository.findOne();
       if (existingUser) {
         return done(undefined, existingUser);
       }
-      User.findOne({ email: profile._json.email }, (err, existingEmailUser) => {
-        if (err) { return done(err); }
-        if (existingEmailUser) {
-          req.flash("errors", { msg: "There is already an account using this email address. Sign in to that account and link it with Facebook manually from Account Settings." });
-          done(err);
-        } else {
-          const user: any = new User();
-          user.email = profile._json.email;
-          user.facebook = profile.id;
-          user.tokens.push({ kind: "facebook", accessToken });
-          user.profile.name = `${profile.name.givenName} ${profile.name.familyName}`;
-          user.profile.gender = profile._json.gender;
-          user.profile.picture = `https://graph.facebook.com/${profile.id}/picture?type=large`;
-          user.profile.location = (profile._json.location) ? profile._json.location.name : "";
-          user.save((err: Error) => {
-            done(err, user);
-          });
-        }
-      });
-    });
+      const existingEmailUser = await userRepository.findOne({ email: profile._json.email});
+      if (existingEmailUser) {
+        req.flash("errors", { msg: "There is already an account using this email address. Sign in to that account and link it with Facebook manually from Account Settings." });
+        done(undefined);
+      } else {
+        const user: UmUser = userRepository.create();
+        user.email = profile._json.email;
+        user.facebook = profile.id;
+        user.facebookToken = accessToken;
+        user.name = `${profile.name.givenName} ${profile.name.familyName}`;
+        user.gender = profile._json.gender;
+        user.picture = `https://graph.facebook.com/${profile.id}/picture?type=large`;
+        user.location = (profile._json.location) ? profile._json.location.name : "";
+        await userRepository.save(user);
+        done(undefined, user);
+      }
+    } catch (error) {
+      if (error) { return done(error); }
+    }
   }
 }));
 
