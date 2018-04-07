@@ -1,6 +1,7 @@
 import passport from "passport";
 import request from "request";
 import passportLocal from "passport-local";
+import passportJwt from "passport-jwt";
 import passportFacebook from "passport-facebook";
 import _ from "lodash";
 
@@ -8,8 +9,12 @@ import _ from "lodash";
 import { UmUser } from "../models/User";
 import { getManager } from "typeorm";
 import { Request, Response, NextFunction } from "express";
+import { JWT_SECRET } from "../util/secrets";
 
 const LocalStrategy = passportLocal.Strategy;
+const JwtStrategy = passportJwt.Strategy;
+const ExtractJwt = passportJwt.ExtractJwt;
+
 const FacebookStrategy = passportFacebook.Strategy;
 
 passport.serializeUser<any, any>((user, done) => {
@@ -49,6 +54,26 @@ passport.use(new LocalStrategy({ usernameField: "email" }, async (email, passwor
   }
 }));
 
+/**
+ * Sign in using JWT tokens
+ */
+passport.use(new JwtStrategy({
+  jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
+  secretOrKey: "secret"
+}, async (payload, done) => {
+  try {
+    const userId = payload.data;
+    console.log("PAYLOAD:::: ", payload);
+    const userRepository = getManager().getRepository(UmUser);
+    const user = await userRepository.findOneById(userId);
+    if (!user) {
+      return done(undefined, false);
+    }
+    done(undefined, user);
+  } catch (error) {
+    done(error, false);
+  }
+}));
 
 /**
  * OAuth Strategy Overview
@@ -135,6 +160,12 @@ export let isAuthenticated = (req: Request, res: Response, next: NextFunction) =
   }
   res.redirect("/login");
 };
+
+export let jwtRoute = (req: Request, res: Response, next: NextFunction) => {
+  console.log("CHECKING>>>>>>");
+  passport.authenticate("jwt", {session: false})(req, res, next);
+};
+
 
 /**
  * Authorization Required middleware.

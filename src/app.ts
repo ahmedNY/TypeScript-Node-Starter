@@ -145,7 +145,12 @@ app.post("/account/delete", passportConfig.isAuthenticated, userController.postD
 app.get("/account/unlink/:provider", passportConfig.isAuthenticated, userController.getOauthUnlink);
 app.get("/posts", postController.postGetAllAction);
 app.get("/posts/:id", postController.postGetByIdAction);
-app.post("/posts", postController.postSaveAction);
+app.post("/posts", passportConfig.jwtRoute, postController.postSaveAction);
+app.post("/profile", passport.authenticate("jwt", { session: false }),
+    function(req, res) {
+        res.send(req.user);
+    }
+);
 
 /**
  * API examples routes.

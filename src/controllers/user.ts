@@ -8,6 +8,15 @@ import { Request, Response, NextFunction } from "express";
 import { IVerifyOptions } from "passport-local";
 const request = require("express-validator");
 
+import JWT from "jsonwebtoken";
+import { JWT_SECRET } from "../util/secrets";
+
+
+function createJwtToken(user: UmUser) {
+  return "Bearer " + JWT.sign({
+    data: user.id
+  }, "secret", { expiresIn: "15 days" });
+}
 
 /**
  * GET /login
@@ -18,7 +27,7 @@ export let getLogin = (req: Request, res: Response) => {
     return res.redirect("/");
   }
   res.render("account/login", {
-    title: "Login"
+  title: "Login"
   });
 };
 
@@ -38,6 +47,7 @@ export let postLogin = (req: Request, res: Response, next: NextFunction) => {
     return res.redirect("/login");
   }
 
+  /*
   passport.authenticate("local", (err: Error, user: UmUser, info: IVerifyOptions) => {
     if (err) { return next(err); }
     if (!user) {
@@ -50,6 +60,23 @@ export let postLogin = (req: Request, res: Response, next: NextFunction) => {
       res.redirect(req.session.returnTo || "/");
     });
   })(req, res, next);
+  */
+
+
+ passport.authenticate("local", (err: Error, user: UmUser, info: IVerifyOptions) => {
+  if (err) { return next(err); }
+  if (!user) {
+    return res.status(401).json({
+      message: "User not found"
+    });
+  }
+
+  const token = createJwtToken(user);
+  return res.json({
+    token
+  });
+})(req, res, next);
+
 };
 
 /**
@@ -105,12 +132,19 @@ export let postSignup = async (req: Request, res: Response, next: NextFunction) 
     });
     await userRepository.save(user);
 
-    req.logIn(user, (err) => {
-      if (err) {
-        return next(err);
-      }
-      res.redirect("/");
-    });
+    // if (req.accepts("html") === undefined) {
+      const token = createJwtToken(user);
+      return res.json({
+        token
+      });
+    // }
+
+    // req.logIn(user, (err) => {
+    //   if (err) {
+    //     return next(err);
+    //   }
+    //   res.redirect("/");
+    // });
   } catch (err) {
     if (err) { return next(err); }
   }
